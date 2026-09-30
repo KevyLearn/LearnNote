@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>離線 AI 繪圖</title>
+  <meta name="description" content="只用你裝置上的記憶體與顯示卡產生 AI 圖片，不上傳、免伺服器、斷網也能用。">
+  <meta name="theme-color" content="#0e0f13">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AI 繪圖">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="icons/icon-192.png" alt="" width="32" height="32">
+      <h1>離線 AI 繪圖</h1>
+    </div>
+    <div class="badges">
+      <span id="offlineBadge" class="badge" title="Service Worker 狀態">準備中…</span>
+      <span id="netBadge" class="badge"></span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="stage" aria-label="生成結果">
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="out" width="1" height="1" aria-label="生成的圖片"></canvas>
+        <div class="placeholder" id="placeholder">
+          <p>輸入描述，按下「生成」</p>
+          <p class="muted">所有運算都在這台裝置的 GPU 上完成</p>
+        </div>
+        <div class="progress" id="progress" hidden>
+          <div class="bar"><span id="progressBar"></span></div>
+          <span class="label" id="progressLabel" aria-live="polite"></span>
+        </div>
+      </div>
+      <p class="meta" id="meta" aria-live="polite"></p>
+      <div class="actions">
+        <button type="button" id="btnDownload" disabled>下載</button>
+        <button type="button" id="btnShare" disabled>分享</button>
+        <button type="button" id="btnAnimate" disabled title="讓神經網路在不同權重之間慢慢變形">動態</button>
+        <button type="button" id="btnVary" disabled title="同一段描述，換一個隨機種子">再一張</button>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="設定">
+      <div class="engine-switch" role="group" aria-label="生成引擎">
+        <button type="button" data-engine="neural" aria-pressed="true">
+          <strong>內建引擎</strong><small>免下載・任何手機</small>
+        </button>
+        <button type="button" data-engine="sd" aria-pressed="false">
+          <strong>SD Turbo</strong><small>真實 AI・需 WebGPU</small>
+        </button>
+      </div>
+
+      <label class="field-label" for="prompt">描述你想要的畫面</label>
+      <textarea id="prompt" rows="3" maxlength="400" placeholder="例如：夕陽下的海邊與遠山，水彩"></textarea>
+      <div class="chips" id="examples" aria-label="範例"></div>
+      <p class="hint" id="promptHint" aria-live="polite"></p>
+
+      <button type="button" id="btnGenerate" class="primary">生成</button>
+
+      <details class="settings" id="settings" open>
+        <summary>設定</summary>
+        <div class="grid">
+          <label class="neural-only">構圖
+            <select id="optComp"></select>
+          </label>
+          <label class="neural-only">風格
+            <select id="optStyle"></select>
+          </label>
+          <label class="neural-only">比例
+            <select id="optAspect">
+              <option value="1:1">1:1 方形</option>
+              <option value="3:4">3:4 直式</option>
+              <option value="9:16">9:16 手機桌布</option>
+              <option value="4:3">4:3 橫式</option>
+              <option value="16:9">16:9 寬螢幕</option>
+            </select>
+          </label>
+          <label class="neural-only">解析度（長邊）
+            <select id="optSize"></select>
+          </label>
+          <label class="neural-only">畫質（抗鋸齒）
+            <select id="optQuality">
+              <option value="1">快速</option>
+              <option value="2">標準</option>
+              <option value="3">精細</option>
+            </select>
+          </label>
+          <label>張數
+            <select id="optCount">
+              <option value="1">1 張</option>
+              <option value="2">2 張</option>
+              <option value="4">4 張</option>
+            </select>
+          </label>
+          <label>種子
+            <input id="optSeed" type="number" inputmode="numeric" min="0" max="2147483647" step="1" value="1">
+          </label>
+          <div class="checks">
+            <label class="check"><input type="checkbox" id="optRandom" checked> 每次隨機種子</label>
+            <label class="check"><input type="checkbox" id="optAutosave" checked> 自動存入作品集</label>
+          </div>
+        </div>
+      </details>
+
+      <div class="sd-panel" id="sdPanel" hidden>
+        <h2>Stable Diffusion Turbo</h2>
+        <p class="muted small">
+          真正的文字轉圖片模型（512×512，一步生成）。模型約 2.5 GB，只需下載或匯入一次，
+          之後存放在瀏覽器內、完全離線運算。建議使用記憶體 8 GB 以上、支援 WebGPU 的裝置；
+          一般手機很可能記憶體不足，請改用內建引擎。提示詞請盡量用英文，中文會自動翻成關鍵字。
+        </p>
+        <ul class="status-list" id="sdStatus"></ul>
+        <ul class="model-list" id="modelList"></ul>
+        <div class="sd-progress" id="sdProgress" hidden>
+          <div class="bar"><span id="sdProgressBar"></span></div>
+          <span class="small" id="sdProgressLabel" aria-live="polite"></span>
+        </div>
+        <div class="row">
+          <button type="button" id="btnSdDownload">下載全部模型</button>
+          <button type="button" id="btnSdDelete" class="danger">刪除模型</button>
+        </div>
+        <label class="check"><input type="checkbox" id="optLowMem"> 省記憶體模式（逐一載入模型，較慢但較不會當掉）</label>
+        <details class="advanced">
+          <summary>進階</summary>
+          <label>模型下載網址（資料夾）
+            <input id="optModelBase" type="url" spellcheck="false" autocomplete="off">
+          </label>
+          <label>運算裝置
+            <select id="optProvider">
+              <option value="webgpu">WebGPU（顯示卡）</option>
+              <option value="wasm">WASM（CPU，非常慢）</option>
+            </select>
+          </label>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <section class="gallery-section" aria-labelledby="galleryTitle">
+    <div class="section-head">
+      <h2 id="galleryTitle">作品集 <small id="galleryCount"></small></h2>
+      <button type="button" id="btnClearGallery" class="ghost small-btn">全部清除</button>
+    </div>
+    <div class="gallery" id="gallery"></div>
+    <p class="muted small" id="galleryEmpty">還沒有作品。生成的圖片只會存在這個瀏覽器裡。</p>
+  </section>
+
+  <footer class="foot">
+    <p id="deviceInfo" class="small muted"></p>
+    <p id="storageInfo" class="small muted"></p>
+    <button type="button" id="btnInstall" hidden>安裝到主畫面</button>
+    <p id="iosHint" class="small muted" hidden>iPhone / iPad：在 Safari 按「分享」→「加入主畫面」，即可像 App 一樣離線開啟。</p>
+    <p class="small muted">
+      不需要帳號、不連伺服器：內建引擎用 WebGL2 在 GPU 上即時計算一個由提示詞決定權重的神經網路；
+      SD Turbo 引擎用 ONNX Runtime Web 在 WebGPU 上執行 Stable Diffusion。
+      <a href="../TableOfContent.html">回目錄</a>
+    </p>
+  </footer>
+
+  <dialog id="viewer">
+    <form method="dialog" class="viewer-body">
+      <img id="viewerImg" alt="">
+      <p id="viewerMeta" class="small"></p>
+      <div class="row wrap">
+        <button type="button" id="vDownload">下載</button>
+        <button type="button" id="vShare">分享</button>
+        <button type="button" id="vApply">套用這組設定</button>
+        <button type="button" id="vDelete" class="danger">刪除</button>
+        <button value="close" class="ghost">關閉</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <input type="file" id="fileImport" accept=".onnx,application/octet-stream" hidden>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
